@@ -6,15 +6,24 @@ A pomodoro timer applet for the COSMIC™ desktop. Sits in the panel and provide
 
 ## Installation
 
-A [justfile](./justfile) is included by default for the [casey/just][just] command runner.
+### Build from source
 
-- `just` builds the application with the default `just build-release` recipe
-- `just run` builds and runs the application
-- `just install` installs the project into the system
-- `just vendor` creates a vendored tarball
-- `just build-vendored` compiles with vendored dependencies from that tarball
-- `just check` runs clippy on the project to check for linter warnings
-- `just check-json` can be used by IDEs that support LSP
+Requires a [Rust toolchain][rustup], [just][just], and the standard COSMIC build dependencies (`pkg-config`, plus dev libraries for dbus, wayland, xkbcommon, etc. — the same packages needed to build any COSMIC applet).
+
+```sh
+just install        # system-wide (/usr), needs sudo
+just install-user   # user-local (~/.local), no root needed
+```
+
+Then add the applet to a panel in **Settings > Desktop > Panel**.
+
+### NixOS
+
+A [nixpkgs package](https://github.com/NixOS/nixpkgs/pull/495307) is in review.
+
+### Flatpak
+
+A [cosmic-flatpak package](https://github.com/pop-os/cosmic-flatpak/pull/116) is in review.
 
 ## Translators
 

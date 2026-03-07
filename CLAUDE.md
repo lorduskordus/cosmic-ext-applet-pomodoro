@@ -74,18 +74,20 @@ COSMIC applets follow an Elm-like architecture via `cosmic::Application`.
 
 ### Subscriptions
 
-Timer/background tasks use `Subscription::run_with_id` with channel-based async. Subscriptions are active only while present in `Subscription::batch` — removing them cancels them. The pattern:
+Timer/background tasks use `Subscription::run_with` with channel-based async. Subscriptions are active only while present in `Subscription::batch` — removing them cancels them. The pattern:
 
 ```rust
 struct TimerTick;
-Subscription::run_with_id(
+Subscription::run_with(
     std::any::TypeId::of::<TimerTick>(),
-    cosmic::iced::stream::channel(1, move |mut channel| async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            _ = channel.send(Message::Tick).await;
-        }
-    }),
+    |_| {
+        cosmic::iced::stream::channel::<Message>(1, async |mut channel| {
+            loop {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                _ = channel.send(Message::Tick).await;
+            }
+        })
+    },
 )
 ```
 

@@ -9,8 +9,8 @@ use cosmic::iced::{window::Id, Alignment, Length, Limits, Subscription};
 use cosmic::iced_winit::commands::popup::{destroy_popup, get_popup};
 use cosmic::prelude::*;
 use cosmic::widget::{self, container};
+use cosmic::iced::futures::SinkExt;
 use cosmic::Theme;
-use futures_util::SinkExt;
 
 const TOMATO_SVG: &[u8] = include_bytes!("../resources/tomato.svg");
 const PAUSE_SVG: &[u8] = include_bytes!("../resources/pause.svg");
@@ -24,6 +24,7 @@ pub enum Phase {
     LongBreak,
 }
 
+#[derive(Default)]
 pub struct AppModel {
     core: cosmic::Core,
     popup: Option<Id>,
@@ -33,21 +34,6 @@ pub struct AppModel {
     remaining_secs: u32,
     paused: bool,
     completed_pomodoros: u32,
-}
-
-impl Default for AppModel {
-    fn default() -> Self {
-        Self {
-            core: cosmic::Core::default(),
-            popup: None,
-            config: Config::default(),
-            config_handler: None,
-            phase: Phase::Idle,
-            remaining_secs: 0,
-            paused: false,
-            completed_pomodoros: 0,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -91,26 +77,23 @@ impl AppModel {
         }
     }
 
-    fn format_time(&self) -> String {
-        let display_secs = if self.phase == Phase::Idle {
+    fn display_secs(&self) -> u32 {
+        if self.phase == Phase::Idle {
             self.config.work_mins * 60
         } else {
             self.remaining_secs
-        };
+        }
+    }
+
+    fn format_time(&self) -> String {
         // Round up so "0" only shows at exactly 0 seconds
-        let mins = display_secs.div_ceil(60);
+        let mins = self.display_secs().div_ceil(60);
         format!("{mins}")
     }
 
     fn format_time_full(&self) -> String {
-        let display_secs = if self.phase == Phase::Idle {
-            self.config.work_mins * 60
-        } else {
-            self.remaining_secs
-        };
-        let mins = display_secs / 60;
-        let secs = display_secs % 60;
-        format!("{mins:02}:{secs:02}")
+        let secs = self.display_secs();
+        format!("{:02}:{:02}", secs / 60, secs % 60)
     }
 
     fn save_config(&self) {
@@ -172,11 +155,14 @@ impl AppModel {
     }
 }
 
-fn timer_container_style(color: cosmic::iced::Color) -> impl Fn(&Theme) -> container::Style {
+fn colored_bg(
+    color: cosmic::iced::Color,
+    radius: f32,
+) -> impl Fn(&Theme) -> container::Style {
     move |_theme: &Theme| container::Style {
         background: Some(color.into()),
         border: cosmic::iced::Border {
-            radius: 12.0.into(),
+            radius: radius.into(),
             ..Default::default()
         },
         ..container::Style::default()
@@ -206,27 +192,6 @@ fn setting_row<'a>(
         .into()
 }
 
-fn progress_bar_bg(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(cosmic::iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08).into()),
-        border: cosmic::iced::Border {
-            radius: 4.0.into(),
-            ..Default::default()
-        },
-        ..container::Style::default()
-    }
-}
-
-fn progress_bar_fill(color: cosmic::iced::Color) -> impl Fn(&Theme) -> container::Style {
-    move |_theme: &Theme| container::Style {
-        background: Some(color.into()),
-        border: cosmic::iced::Border {
-            radius: 4.0.into(),
-            ..Default::default()
-        },
-        ..container::Style::default()
-    }
-}
 
 impl cosmic::Application for AppModel {
     type Executor = cosmic::executor::Default;
@@ -312,7 +277,7 @@ impl cosmic::Application for AppModel {
             .class(cosmic::theme::Button::AppletIcon);
 
         widget::mouse_area(btn)
-            .on_right_press(Message::TogglePopup)
+            .on_right_release(Message::TogglePopup)
             .into()
     }
 
@@ -342,19 +307,26 @@ impl cosmic::Application for AppModel {
         let bar_width = (280.0 * progress) as u16;
 
         let progress_bar = widget::container(
-            widget::container(widget::horizontal_space())
+            widget::container(widget::space())
                 .width(Length::Fixed(f32::from(bar_width)))
                 .height(6)
-                .style(progress_bar_fill(self.phase_color())),
+                .style(colored_bg(self.phase_color(), 4.0)),
         )
         .width(280)
         .height(6)
-        .style(progress_bar_bg);
+        .style(colored_bg(
+            cosmic::iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+            4.0,
+        ));
 
         // Pomodoro dots — filled for completed, empty for remaining
         let mut dots = widget::row().spacing(6);
         let goal = self.config.long_break_interval.max(1);
-        let completed_in_cycle = self.completed_pomodoros % goal;
+        let completed_in_cycle = match self.phase {
+            Phase::Work => (self.completed_pomodoros % goal) + 1,
+            Phase::LongBreak => goal,
+            _ => self.completed_pomodoros % goal,
+        };
         for i in 0..goal {
             let dot_color = if i < completed_in_cycle {
                 self.phase_color()
@@ -362,17 +334,10 @@ impl cosmic::Application for AppModel {
                 cosmic::iced::Color::from_rgba(1.0, 1.0, 1.0, 0.15)
             };
             dots = dots.push(
-                widget::container(widget::horizontal_space())
+                widget::container(widget::space())
                     .width(10)
                     .height(10)
-                    .style(move |_theme: &Theme| container::Style {
-                        background: Some(dot_color.into()),
-                        border: cosmic::iced::Border {
-                            radius: 5.0.into(),
-                            ..Default::default()
-                        },
-                        ..container::Style::default()
-                    }),
+                    .style(colored_bg(dot_color, 5.0)),
             );
         }
 
@@ -387,7 +352,7 @@ impl cosmic::Application for AppModel {
         .width(Length::Fill)
         .padding([20, 24])
         .align_x(Alignment::Center)
-        .style(timer_container_style(self.phase_color_muted()));
+        .style(colored_bg(self.phase_color_muted(), 12.0));
 
         // Controls
         let mut controls = widget::row().spacing(8);
@@ -431,14 +396,16 @@ impl cosmic::Application for AppModel {
 
         if self.phase != Phase::Idle && !self.paused {
             struct TimerTick;
-            subs.push(Subscription::run_with_id(
+            subs.push(Subscription::run_with(
                 std::any::TypeId::of::<TimerTick>(),
-                cosmic::iced::stream::channel(1, move |mut channel| async move {
-                    loop {
-                        tokio::time::sleep(Duration::from_secs(1)).await;
-                        _ = channel.send(Message::Tick).await;
-                    }
-                }),
+                |_| {
+                    cosmic::iced::stream::channel::<Message>(1, async |mut channel| {
+                        loop {
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                            _ = channel.send(Message::Tick).await;
+                        }
+                    })
+                },
             ));
         }
 
@@ -541,7 +508,7 @@ impl cosmic::Application for AppModel {
         Task::none()
     }
 
-    fn style(&self) -> Option<cosmic::iced_runtime::Appearance> {
+    fn style(&self) -> Option<cosmic::iced::theme::Style> {
         Some(cosmic::applet::style())
     }
 }
